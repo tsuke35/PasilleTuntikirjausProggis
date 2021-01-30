@@ -136,108 +136,132 @@ $customerListCustomObject | ForEach-Object {
 
 $workHourMarkings = @()
 
-# Get all worksheets in the file
-$workSheets = Get-ExcelSheetInfo $WorkHoursExcelFile
-
-foreach ($workSheet in $workSheets)
+foreach ($file in $WorkHoursExcelFile)
 {
-    $firstIteration = $true
-
-    # Import current worksheet content
-    $currentWorkHoursFileContent = Import-Excel -Path $workSheet.Path -WorksheetName $workSheet.Name -NoHeader
-
-    # Initialize variable
-    # Map column property name and project reference number (e.g P5 = 01123456) together to easily find the matching project for columns
-    # This hashtable will be constructed during processing of row 2 (if P2 equals "Total")
-    $projectNumberMappingToSheetsPropertyNames = @{}
-
-    # Start loop for each row in current work sheet
-    foreach ($row in $currentWorkHoursFileContent)
+    # Check object type to enable string and FileInfo inputs
+    if ($file.GetType().Name -eq "FileInfo")
     {
-        # If first row and it's empty
-        if ($firstIteration -eq $true)
-        {
-            $lastProperty = $row.PSObject.Properties.Name | Sort-Object -Descending | Select-Object -First 1
-            $firstIteration = $false
+        $filePath = $file.FullName
+    }
 
-            # If last property on this row is empty - skip
-            if (!($row.$($lastProperty))) 
+    else
+    {
+        try
+        {
+            Test-Path $file -ErrorAction Stop | Out-Null
+            $filePath = $file
+        }
+
+        catch
+        {
+            Write-Error "Ei pystytty lukemaan tuntikirjaustiedostoa $($file.ToString()) - Virheilmoitus: $_"
+            continue
+        }
+    }
+    
+    # Get all worksheets in the file
+    $workSheets = Get-ExcelSheetInfo $filePath
+
+    foreach ($workSheet in $workSheets)
+    {
+        $firstIteration = $true
+
+        # Import current worksheet content
+        $currentWorkHoursFileContent = Import-Excel -Path $workSheet.Path -WorksheetName $workSheet.Name -NoHeader
+
+        # Initialize variable
+        # Map column property name and project reference number (e.g P5 = 01123456) together to easily find the matching project for columns
+        # This hashtable will be constructed during processing of row 2 (if P2 equals "Total")
+        $projectNumberMappingToSheetsPropertyNames = @{}
+
+        # Start loop for each row in current work sheet
+        foreach ($row in $currentWorkHoursFileContent)
+        {
+            # If first row and it's empty
+            if ($firstIteration -eq $true)
+            {
+                $lastProperty = $row.PSObject.Properties.Name | Sort-Object -Descending | Select-Object -First 1
+                $firstIteration = $false
+
+                # If last property on this row is empty - skip
+                if (!($row.$($lastProperty))) 
+                {
+                    continue
+                }
+            }
+            
+            # If third row of file, skip
+            elseif ($row.P2 -eq "PVM")
             {
                 continue
             }
-        }
-        
-        # If third row of file, skip
-        elseif ($row.P2 -eq "PVM")
-        {
-            continue
-        }
 
-        # This is the second line of file that defines all the project numbers, save mapping hashtable for later use
-        elseif ($row.P2 -eq "Total")
-        {
-            $i = 3
-            # Parse all project numbers included in this worksheet
-            do 
+            # This is the second line of file that defines all the project numbers, save mapping hashtable for later use
+            elseif ($row.P2 -eq "Total")
             {
-                $currentIterationColumnHeaderName = "P" + $i.ToString()
-
-                # Select project number value with this header name value
-                $currentValue = $row.$($currentIterationColumnHeaderName)
-
-                # if value not 'selitys' add project number to hashtable with empty hashtable as value
-                if (!($currentValue -eq 'selitys'))
+                $i = 3
+                # Parse all project numbers included in this worksheet
+                do 
                 {
-                    $projectNumberMappingToSheetsPropertyNames.Add($currentIterationColumnHeaderName, $currentValue)
+                    $currentIterationColumnHeaderName = "P" + $i.ToString()
+
+                    # Select project number value with this header name value
+                    $currentValue = $row.$($currentIterationColumnHeaderName)
+
+                    # if value not 'selitys' add project number to hashtable with empty hashtable as value
+                    if (!($currentValue -eq 'selitys'))
+                    {
+                        $projectNumberMappingToSheetsPropertyNames.Add($currentIterationColumnHeaderName, $currentValue)
+                    }
+
+                    # Increment i value by one to continue to next column
+                    $i++
                 }
-
-                # Increment i value by one to continue to next column
-                $i++
+                
+                until ($currentValue -eq 'selitys')
             }
-            
-            until ($currentValue -eq 'selitys')
-        }
 
-        # If value exists in any of P1 (pvm), P2 (total) or the last property (selitys) -> then parse the row contents
-        elseif ($row.$($lastProperty) -or $row.P1 -or $row.P2)
-        {
-            # Select all property values excluding first, second and last
-            $iteratableProperties = $row.PSObject.Properties.Name | Where-Object {$_ -notin "P1","P2",$lastProperty}
-            
-            foreach ($property in $iteratableProperties)
+            # If value exists in any of P1 (pvm), P2 (total) or the last property (selitys) -> then parse the row contents
+            elseif ($row.$($lastProperty) -or $row.P1 -or $row.P2)
             {
-                $rowValue = $row.$($property)
-             
-                # If cell has value
-                if ($rowValue)
+                # Select all property values excluding first, second and last
+                $iteratableProperties = $row.PSObject.Properties.Name | Where-Object {$_ -notin "P1","P2",$lastProperty}
+                
+                foreach ($property in $iteratableProperties)
                 {
-                    # Get project name based on mapping value of hashtable and the column name (propertyname)
-                    $projectReferenceNumber = $projectNumberMappingToSheetsPropertyNames[$property]
-                    # Get customer information based on project reference number
-                    $customerInformation = $projectMappingHashtable[$projectReferenceNumber]
+                    $rowValue = $row.$($property)
+                
+                    # If cell has value
+                    if ($rowValue)
+                    {
+                        # Get project name based on mapping value of hashtable and the column name (propertyname)
+                        $projectReferenceNumber = $projectNumberMappingToSheetsPropertyNames[$property]
+                        # Get customer information based on project reference number
+                        $customerInformation = $projectMappingHashtable[$projectReferenceNumber]
 
-                    $workHourMarkingProperties = [ordered]@{
-                                        'Date' = $row.'P1'                
-                                        # replace , with . to enable correct number behaviour
-                                        'Hours' = [float]($rowValue -replace ",",".")
-                                        'ProjectReferenceNumber' = $projectReferenceNumber
-                                        'ProjectName' = $customerInformation.ProjectName
-                                        'ProjectNumber' = $customerInformation.ProjectNumber
-                                        'CustomerName' = $customerInformation.CustomerName
-                                        'CustomerNumber' = $customerInformation.CustomerNumber
-                                        'Definition' = $row.$($lastProperty)
-                                    }
-                    
-                    $workHourMarkings += New-Object psobject -Property $workHourMarkingProperties
+                        $workHourMarkingProperties = [ordered]@{
+                                            'Date' = $row.'P1'                
+                                            # replace , with . to enable correct number behaviour
+                                            'Hours' = [float]($rowValue -replace ",",".")
+                                            'ProjectReferenceNumber' = $projectReferenceNumber
+                                            'ProjectName' = $customerInformation.ProjectName
+                                            'ProjectNumber' = $customerInformation.ProjectNumber
+                                            'CustomerName' = $customerInformation.CustomerName
+                                            'CustomerNumber' = $customerInformation.CustomerNumber
+                                            'Definition' = $row.$($lastProperty)
+                                        }
+                        
+                        $workHourMarkings += New-Object psobject -Property $workHourMarkingProperties
 
+                    }
                 }
             }
-        }
-        
-        # Propably an empty row in the middle of content? dunno why this would ever happen :<
-        else
-        {
-            continue    
+            
+            # Propably an empty row in the middle of content? dunno why this would ever happen :<
+            else
+            {
+                continue    
+            }
         }
     }
 }
