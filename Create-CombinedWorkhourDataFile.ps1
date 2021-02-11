@@ -1,7 +1,7 @@
 ﻿Param (
         $CustomerListingExcelFile = 'esimerkkiasiakaslista.xlsx',
         $WorkHoursExcelFile = 'esimerkkikirjanpit.xlsx',
-        $ExportFileName = 'combinedContent.csv'
+        $ExportFileName = 'combinedContent.xlsx'
         )
 
 # Set working location
@@ -263,6 +263,49 @@ foreach ($file in $WorkHoursExcelFile)
                 continue    
             }
         }
+    }
+}
+
+# If content is null for some reason?
+if (!$workHourMarkings)
+{
+    $errMsg = 'Jotain meni vikaan, koska työaikamerkintöjä ei tullut lainkaan lopulliseen muuttujaan! Ei tehdä excel tiedoston exporttia. Kaadetaan skriptin suoritus..'
+    Write-Error $errMsg; Start-Sleep -Seconds 10; throw $errMsg
+}
+
+###
+# END OF 'READ WORKHOURS EXCEL AND PARSE ITS CONTENTS'
+###
+
+
+
+###
+# START OF 'EXPORT COMBINED DATA INTO NEW WORKBOOK'
+###
+
+# Get all unique customers in parsed content
+$customers = ($workHourMarkings | Select-Object -Property CustomerName -Unique).CustomerName
+
+foreach ($customer in $customers)
+{
+    # If file exists already -> Only create new worksheet
+    if (Test-Path $ExportFileName)
+    {
+        # If missing Excel object needed for worksheet addition
+        if (!$ExcelExportFileObject)
+        {
+            $ExcelExportFileObject = Open-ExcelPackage $ExportFileName
+        }
+
+        # Add new blank worksheet with 'customer' as the name
+        #Add-Worksheet -ExcelPackage $ExcelExportFileObject -WorksheetName $customer -ClearSheet | Out-Null
+        Export-Excel -Path $ExportFileName -WorksheetName $customer
+    }
+
+    # Otherwise create new xlxs file and set the first worksheet name
+    else
+    {
+        Export-Excel -Path $ExportFileName -WorksheetName $customer
     }
 }
 
