@@ -286,28 +286,17 @@ if (!$workHourMarkings)
 # Get all unique customers in parsed content
 $customers = ($workHourMarkings | Select-Object -Property CustomerName -Unique).CustomerName
 
-foreach ($customer in $customers)
+# Remove file that was before
+if (Test-Path $ExportFileName)
 {
-    # If file exists already -> Only create new worksheet
-    if (Test-Path $ExportFileName)
-    {
-        # If missing Excel object needed for worksheet addition
-        if (!$ExcelExportFileObject)
-        {
-            $ExcelExportFileObject = Open-ExcelPackage $ExportFileName
-        }
-
-        # Add new blank worksheet with 'customer' as the name
-        #Add-Worksheet -ExcelPackage $ExcelExportFileObject -WorksheetName $customer -ClearSheet | Out-Null
-        Export-Excel -Path $ExportFileName -WorksheetName $customer
-    }
-
-    # Otherwise create new xlxs file and set the first worksheet name
-    else
-    {
-        Export-Excel -Path $ExportFileName -WorksheetName $customer
-    }
+    Remove-Item $ExportFileName -Force -ErrorAction Inquire
 }
 
-# Export file as csv that can be easily opened in Excel
-$workHourMarkings | Export-Csv -Path $ExportFileName -Encoding UTF8 -Delimiter ";" -NoTypeInformation
+foreach ($customer in $customers)
+{
+    # Filter single customer workhour markings + sort project+date
+    $customerContent = $workHourMarkings | Where-Object {$_.CustomerName -eq $customer} | Sort-Object -Property ProjectNumber,Date
+
+    # Create new worksheet as the customer as it's name
+    $customerContent | Export-Excel -Path $ExportFileName -WorksheetName $customer
+}
